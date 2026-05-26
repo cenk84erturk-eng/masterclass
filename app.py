@@ -1,36 +1,50 @@
-import json
+import sqlite3
 from pathlib import Path
 
 from flask import Flask, redirect, render_template, request, url_for
 
 app = Flask(__name__)
 
-TASKS_FILE = Path(__file__).parent / "tasks.json"
+DB_PATH = Path(__file__).parent / "tasks.db"
 
 
-def load_tasks():
-    if not TASKS_FILE.exists():
-        return []
-    return json.loads(TASKS_FILE.read_text())
+def get_db():
+    db = sqlite3.connect(DB_PATH)
+    db.row_factory = sqlite3.Row
+    return db
 
 
-def save_tasks(tasks):
-    TASKS_FILE.write_text(json.dumps(tasks, indent=2))
+def init_db():
+    with get_db() as db:
+        db.execute(
+            "CREATE TABLE IF NOT EXISTS tasks "
+            "(id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT NOT NULL, completed INTEGER NOT NULL DEFAULT 0)"
+        )
+
+
+init_db()
 
 
 @app.route("/")
 def index():
-    return render_template("index.html", tasks=load_tasks())
+    with get_db() as db:
+        tasks = db.execute("SELECT * FROM tasks").fetchall()
+    return render_template("index.html", tasks=tasks)
 
 
 @app.route("/add", methods=["POST"])
 def add():
     title = request.form.get("title", "").strip()
     if title:
-        tasks = load_tasks()
-        next_id = max((task["id"] for task in tasks), default=0) + 1
-        tasks.append({"id": next_id, "title": title})
-        save_tasks(tasks)
+        with get_db() as db:
+            db.execute("INSERT INTO tasks (title) VALUES (?)", (title,))
+    return redirect(url_for("index"))
+
+
+@app.route("/complete/<int:task_id>", methods=["POST"])
+def complete(task_id):
+    with get_db() as db:
+        db.execute("UPDATE tasks SET completed = 1 WHERE id = ?", (task_id,))
     return redirect(url_for("index"))
 
 
